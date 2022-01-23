@@ -1,10 +1,16 @@
 #! /usr/bin/env bash
 
+set -eo pipefail
+
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE}")" && pwd )"
+
+. "$SCRIPT_DIR/common"
+
 is_user_root () { [ "$(id -u)" -eq 0 ]; }
 
 if ! is_user_root
 then
-	echo "Need to be root to run this script"
+	error_msg "Need to be root to run this script"
 	exit 1
 fi
 
@@ -12,6 +18,15 @@ apt update
 apt -y install \
 	curl \
 	git \
+	neovim \
 	python3 \
 	vim \
+	xsel \
 	zsh
+
+curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+apt install -y nodejs
+
+npm i -g bash-language-server
+
+success_msg "Successfully installed needed packages"

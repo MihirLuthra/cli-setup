@@ -1,0 +1,51 @@
+#! /usr/bin/env bash
+
+readonly NC='\033[0m' # No Color
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly PURPLE='\033[0;35m'
+
+readonly POINTER='---------> '
+
+readonly VIMRC="$HOME/.vimrc"
+readonly ZSHRC="$HOME/.zshrc"
+
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE}")" && pwd )"
+
+readonly SUPPORT_FILES="$SCRIPT_DIR/support_files"
+readonly SHELL_SUPPORT_FILES="$SUPPORT_FILES/shell"
+readonly VIM_SUPPORT_FILES="$SUPPORT_FILES/vim"
+
+success_msg() {
+	echo -e "${GREEN}${POINTER}"$@"${NC}"
+}
+
+error_msg() {
+	>&2 echo -e "${RED}${POINTER}"$@"${NC}"
+}
+
+status_msg() {
+	echo -e "${PURPLE}${POINTER}"$@"${NC}"
+}
+
+command_exists() {
+	[ -z "$1" ] && return 1
+	command -v $1 &> /dev/null
+}
+
+# First arg is the name of dependent &
+# is used in error message
+# Checks for all remaining args if they exist.
+check_deps() {
+	local required_by=$1; shift
+
+	for dep in "$@"
+	do
+		if ! command_exists "$dep"
+		then
+			error_msg "$dep not found & is required by $required_by"
+			return 1
+		fi
+	done
+}
+

@@ -2,49 +2,13 @@
 
 set -eo pipefail
 
-readonly SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE}")" && pwd )"
+SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE}")" && pwd )"
 
-readonly NC='\033[0m' # No Color
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly PURPLE='\033[0;35m'
-
-readonly POINTER='>>>>>>>>>> '
-
-success_msg() {
-	echo -e "${GREEN}${POINTER}"$@"${NC}"
-}
-
-error_msg() {
-	>&2 echo -e "${RED}${POINTER}"$@"${NC}"
-}
-
-status_msg() {
-	echo -e "${PURPLE}${POINTER}"$@"${NC}"
-}
-
-command_exists() {
-	[ -z "$1" ] && return 1
-	command -v $1 &> /dev/null
-}
-
-# First arg is the name of dependent &
-# is used in error message
-# Checks for all remaining args if they exist.
-check_deps() {
-	local required_by=$1; shift
-
-	for dep in "$@"
-	do
-		if ! command_exists "$dep"
-		then
-			error_msg "$dep not found & is required by $required_by"
-			return 1
-		fi
-	done
-}
+. "$SCRIPT_DIR/common"
 
 install_fzf() {
+	status_msg "\nEntered fzf setup"
+
 	check_deps 'fzf' \
 		python \
 		git
@@ -60,29 +24,46 @@ install_fzf() {
 	~/.fzf/install --key-bindings --completion --update-rc
 }
 
-backup_zshrc() {
-	local zshrc="$HOME/.zshrc"
-	local zshrc_backup="/tmp/.zshrc_backup"
+backup_file() {
+	local file_path=$1; shift
+
+	if [ ! -e "$file_path" ]
+	then
+		error_msg "Failed to backup $file_path as it doesn't exist"
+		return 0
+	fi
+
+	local file="$(basename "$file_path")"
+	local file_backup="/tmp/${file}_backup"
 	local counter=0
 
-	while [ -f "${zshrc_backup}_${counter}" ]
+	while [ -f "${file_backup}_${counter}" ]
 	do
 		counter=$( expr $counter + 1 )
 	done
 
-	local zshrc_backup_file="${zshrc_backup}_${counter}"
+	local backup_file="${file_backup}_${counter}"
 
-	cp "$zshrc" "$zshrc_backup_file"
+	cp "$file_path" "$backup_file"
 
-	status_msg "backed up ~/.zshrc at $zshrc_backup_file"
+	status_msg "backed up $file_path at $backup_file"
+}
+
+backup_zshrc() {
+	backup_file "$ZSHRC"
+}
+
+backup_vimrc() {
+	backup_file "$VIMRC"
 }
 
 setup_zsh() {
+	status_msg "\nEntered zsh setup"
+
 	check_deps 'setup_zsh' \
 		zsh \
 		curl
 
-	local zshrc="$HOME/.zshrc"
 	local zsh="$(command -v zsh)"
 
 	# install ohmyzsh
@@ -109,11 +90,11 @@ setup_zsh() {
 
 		backup_zshrc
 
-		local zsh_contents="$( < "$zshrc")"
-		local to_prepend="$( < "$SCRIPT_DIR/for_zshrc.zsh")"
+		local zsh_contents="$( < "$ZSHRC" )"
+		local to_prepend="$( < "$SHELL_SUPPORT_FILES/plugins.zsh" )"
 
-		echo "$to_prepend" > "$zshrc"
-		echo "$zsh_contents" >> "$zshrc"
+		echo "$to_prepend" > "$ZSHRC"
+		echo "$zsh_contents" >> "$ZSHRC"
 	fi
 
 	if [ -e "$HOME/.zsh/pure" ]
@@ -127,9 +108,9 @@ setup_zsh() {
 		mkdir -p "$HOME/.zsh"
 		git clone https://github.com/sindresorhus/pure.git "$HOME/.zsh/pure"
 
-		echo 'fpath+=$HOME/.zsh/pure' >> "$zshrc"
-		echo 'autoload -U promptinit; promptinit' >> "$zshrc"
-		echo 'prompt pure' >> "$zshrc"
+		echo 'fpath+=$HOME/.zsh/pure' >> "$ZSHRC"
+		echo 'autoload -U promptinit; promptinit' >> "$ZSHRC"
+		echo 'prompt pure' >> "$ZSHRC"
 	fi
 
 	success_msg "zsh setup successful, you will need to change shell manually by:"
@@ -138,10 +119,83 @@ setup_zsh() {
 	success_msg "Meanwhile, you can do 'exec zsh' to start using zsh"
 }
 
+setup_nvim() {
+	status_msg "Entered neovim setup"
+
+	check_deps 'setup neovim' \
+		bash-language-server \
+		curl \
+		node \
+		npm \
+		nvim \
+		vim
+
+	local coc_config="$HOME/.vim/coc-settings.json"
+	local nvim_coc_config="$HOME/.config/nvim/coc-settings.json"
+
+	status_msg "Sharing config between vim and nvim"
+	mkdir -p ~/.config/nvim
+	touch "$VIMRC"
+	printf "%s\n" \
+		'set runtimepath^=~/.vim runtimepath+=~/.vim/after' \
+		'let &packpath=&runtimepath' \
+		'source ~/.vimrc' \
+		>> "$HOME/.config/nvim/init.vim"
+
+	status_msg "Installing vim-plug for vim"
+
+	curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
+		https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+
+	status_msg "Installing vim-plug for neovim"
+
+	sh -c 'curl -fLo "${XDG_DATA_HOME:-$HOME/.local/share}"/nvim/site/autoload/plug.vim --create-dirs \
+		https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim'
+
+	status_msg "Now setting $VIMRC"
+
+	backup_vimrc
+
+	local new_vimrc_contents="$( < "$VIM_SUPPORT_FILES/plugins.vim" )"
+
+	echo "$new_vimrc_contents" > "$VIMRC"
+
+	vim -c 'PlugInstall | echo "Please quit vim when plugins are installed"' "$VIMRC"
+
+	echo -e "\n\nso $VIM_SUPPORT_FILES/coc_nvim_example_config.vim" >> "$VIMRC"
+
+	status_msg "Setting up $coc_config and $nvim_coc_config"
+
+	backup_file "$coc_config"
+	backup_file "$nvim_coc_config"
+
+	local new_coc_config_contents="$( < "$SUPPORT_FILES/coc_config.json" )"
+
+	echo "$new_coc_config_contents" > "$coc_config"
+	echo "$new_coc_config_contents" > "$nvim_coc_config"
+
+	success_msg "Neovim setup complete"
+	success_msg "See: https://github.com/neoclide/coc.nvim/wiki/Language-servers"
+}
+
+persistent_undo() {
+	status_msg "Going to set persistent undo in vim"
+
+	backup_vimrc
+
+	echo "so $VIM_SUPPORT_FILES/persistent_undo.vim" >> "$VIMRC"
+
+	success_msg "Successfully added persistent undo code to $VIMRC"
+}
+
 main() {
+	setup_zsh
+	
 	install_fzf
 
-	setup_zsh
+	setup_nvim
+
+	persistent_undo
 
 	success_msg "SETUP DONE!"
 }
