@@ -1,0 +1,17 @@
+#! /usr/bin/env bash
+
+is_user_root () { [ "$(id -u)" -eq 0 ]; }
+
+if ! is_user_root
+then
+	echo "Need to be root to run this script"
+	exit 1
+fi
+
+apt update
+apt -y install \
+	curl \
+	git \
+	python3 \
+	vim \
+	zsh

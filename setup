@@ -1,0 +1,149 @@
+#! /usr/bin/env bash
+
+set -eo pipefail
+
+readonly SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE}")" && pwd )"
+
+readonly NC='\033[0m' # No Color
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly PURPLE='\033[0;35m'
+
+readonly POINTER='>>>>>>>>>> '
+
+success_msg() {
+	echo -e "${GREEN}${POINTER}"$@"${NC}"
+}
+
+error_msg() {
+	>&2 echo -e "${RED}${POINTER}"$@"${NC}"
+}
+
+status_msg() {
+	echo -e "${PURPLE}${POINTER}"$@"${NC}"
+}
+
+command_exists() {
+	[ -z "$1" ] && return 1
+	command -v $1 &> /dev/null
+}
+
+# First arg is the name of dependent &
+# is used in error message
+# Checks for all remaining args if they exist.
+check_deps() {
+	local required_by=$1; shift
+
+	for dep in "$@"
+	do
+		if ! command_exists "$dep"
+		then
+			error_msg "$dep not found & is required by $required_by"
+			return 1
+		fi
+	done
+}
+
+install_fzf() {
+	check_deps 'fzf' \
+		python \
+		git
+
+	if command_exists 'fzf'
+	then
+		status_msg "fzf already installed, skipping fzf setup"
+		return 0
+	fi
+
+	# installs fzf and enables completion and key bindings
+	git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+	~/.fzf/install --key-bindings --completion --update-rc
+}
+
+backup_zshrc() {
+	local zshrc="$HOME/.zshrc"
+	local zshrc_backup="/tmp/.zshrc_backup"
+	local counter=0
+
+	while [ -f "${zshrc_backup}_${counter}" ]
+	do
+		counter=$( expr $counter + 1 )
+	done
+
+	local zshrc_backup_file="${zshrc_backup}_${counter}"
+
+	cp "$zshrc" "$zshrc_backup_file"
+
+	status_msg "backed up ~/.zshrc at $zshrc_backup_file"
+}
+
+setup_zsh() {
+	check_deps 'setup_zsh' \
+		zsh \
+		curl
+
+	local zshrc="$HOME/.zshrc"
+	local zsh="$(command -v zsh)"
+
+	# install ohmyzsh
+	if [ -e "$HOME/.oh-my-zsh" ]
+	then
+		status_msg "$HOME/.oh-my-zsh already installed, skipping ohmyzsh setup"
+	else
+		status_msg "Installing ohmyzsh"
+
+		export CHSH='no'
+		export RUNZSH='no'
+		sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+		unset CHSH
+		unset RUNZSH
+	fi
+
+	if [ -f "$HOME/antigen.zsh" ]
+	then
+		status_msg "$HOME/antigen.zsh already exists, skipping antigen setup"
+	else
+		status_msg "Installing antigen"
+
+		curl -L git.io/antigen > $HOME/antigen.zsh
+
+		backup_zshrc
+
+		local zsh_contents="$( < "$zshrc")"
+		local to_prepend="$( < "$SCRIPT_DIR/for_zshrc.zsh")"
+
+		echo "$to_prepend" > "$zshrc"
+		echo "$zsh_contents" >> "$zshrc"
+	fi
+
+	if [ -e "$HOME/.zsh/pure" ]
+	then
+		status_msg "$HOME/.zsh/pure already exists, skipping setup for theme pure"
+	else
+		status_msg "Installing zsh theme named 'pure'"
+
+		backup_zshrc
+
+		mkdir -p "$HOME/.zsh"
+		git clone https://github.com/sindresorhus/pure.git "$HOME/.zsh/pure"
+
+		echo 'fpath+=$HOME/.zsh/pure' >> "$zshrc"
+		echo 'autoload -U promptinit; promptinit' >> "$zshrc"
+		echo 'prompt pure' >> "$zshrc"
+	fi
+
+	success_msg "zsh setup successful, you will need to change shell manually by:"
+	success_msg 'sudo chsh -s "$(command -v zsh)" "$USER"'
+	success_msg "You may need to restart the system for the changes to take effect"
+	success_msg "Meanwhile, you can do 'exec zsh' to start using zsh"
+}
+
+main() {
+	install_fzf
+
+	setup_zsh
+
+	success_msg "SETUP DONE!"
+}
+
+main "$@"
